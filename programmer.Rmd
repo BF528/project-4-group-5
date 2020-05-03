@@ -1,0 +1,145 @@
+---
+title: "R Notebook"
+output:
+  word_document: default
+  html_notebook: default
+---
+
+```{r}
+setwd('/projectnb/bf528/users/group_5/project_4/evie')
+```
+
+
+```{r}
+#install.packages("Seurat")
+#BiocManager::install("tximport")
+library(dplyr)
+library(Seurat)
+library(patchwork)
+library(tibble)
+library(tximport)
+```
+
+#file paths
+```{r}
+files04 <- file.path('/projectnb/bf528/users/group_5/project_4/salam/counts_alevin/SRR3879604_counts/alevin/quants_mat.gz')
+files05 <- file.path('/projectnb/bf528/users/group_5/project_4/salam/counts_alevin/SRR3879605_counts/alevin/quants_mat.gz')
+files06 <-file.path('/projectnb/bf528/users/group_5/project_4/salam/counts_alevin/SRR3879606_counts/alevin/quants_mat.gz')
+```
+
+
+#read in alevin file
+```{r}
+txi_04 <- tximport(files04, type="alevin")$counts 
+txi_05 <- tximport(files05, type="alevin")$counts
+txi_06 <- tximport(files06, type="alevin")$counts
+
+txi_05 <- txi_05[rownames(txi_04), ]
+txi_06 <- txi_06[rownames(txi_05), ]
+
+txi_all <- cbind(txi_04, txi_05, txi_06)
+```
+
+
+#Mitochondria
+
+```{r}
+
+#convert id to gene name
+#matrix04
+panc_cells <- CreateSeuratObject(counts = txi_all, project = "panc_cells", min.cells = 3, min.features = 20)
+txi04_ct <- as.data.frame(panc_cells@assays$RNA@data@Dimnames[[1]])
+eid04 <- (txi04_ct[,1])
+write.table(eid04, "eid04.txt", row.names = FALSE, quote = FALSE)
+eid04_file <- read.delim("/projectnb2/bf528/users/group_5/project_4/evie/mart_export (8).txt")
+genes04 <- eid04_file$Gene.name
+genes04 <- as.character(genes04)
+
+panc_cells@assays$RNA@data@Dimnames[[1]] <- genes04
+panc_cells@assays$RNA@counts@Dimnames[[1]] <- genes04
+panc_cells[["percent.mt"]] <- PercentageFeatureSet(panc_cells, pattern = "^MT-")
+
+#before_filter <- subset(genes_paper, !genes_paper %in% panc_cells@assays$RNA@counts@Dimnames[[1]])
+#INS" "PPY" not in list
+
+panc_cells <- subset(panc_cells, subset = nFeature_RNA > 200 & nFeature_RNA < 4000 & percent.mt < 5)
+
+```
+
+
+```{r}
+VlnPlot(panc_cells, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 2)
+
+
+#visualize feature-feature relationships
+plot1 <- FeatureScatter(panc_cells, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(panc_cells, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 
+plot2
+
+```
+
+
+#normalization
+```{r}
+panc_cells <- NormalizeData(panc_cells, normalization.method = "LogNormalize", scale.factor = 10000)
+
+```
+
+#features that exhibit high cell-to-cell variation
+```{r}
+panc_cells[["RNA"]]@meta.features <- data.frame(row.names = rownames(panc_cells[["RNA"]]))
+ntf_04 = round(0.1*nrow(panc_cells[["RNA"]]), digits = 0)
+panc_cells <- FindVariableFeatures(panc_cells, selection.method = "vst", nfeatures = ntf_04)
+
+
+top10 <- head(VariableFeatures(panc_cells), 10)
+plot3 <- VariableFeaturePlot(panc_cells)
+plot4 <- LabelPoints(plot = plot3, points = top10, repel = TRUE, xnudge = 0, ynudge = 0)
+plot4
+
+```
+
+#Scale Data
+```{r}
+all.genes.04 <- rownames(panc_cells)
+panc_cells <- ScaleData(panc_cells, features = all.genes.04)
+
+```
+
+#identify clusters
+with each PC essentially representing a ‘metafeature’ that combines information across a correlated feature set.
+
+```{r}
+panc_cells <- RunPCA(panc_cells, features = VariableFeatures(object = panc_cells))
+
+#print(panc_cells[["pca"]], dims = 1:10, nfeatures = 10)
+#VizDimLoadings(panc_cells, dims = 1:2, reduction = "pca")
+#DimPlot(panc_cells, reduction = "pca")
+DimHeatmap(panc_cells, dims = 1:5, cells = 500, balanced = TRUE)
+
+ElbowPlot(panc_cells)
+panc_cells <- FindNeighbors(panc_cells, dims = 1:10)
+panc_cells <- FindClusters(panc_cells, resolution = 0.75)
+file04_clusters <- Idents(panc_cells)
+head(Idents(panc_cells), 5)
+
+
+saveRDS(panc_cells, file = "programmer_output.rda")
+clusters <- as.data.frame(Idents(panc_cells))
+clusters2 <- clusters %>% rownames_to_column("cells") %>% group_by(Idents(panc_cells)) %>% summarise(n())
+colnames(clusters2) <- c("Clusters", "Number of Cells")
+```
+
+
+```{r}
+genes_paper <- c("GCG", "INS", "PPY", "SST", "GHRL", "PRSS1", "KRT19", "SPARC", "VWF", "RGS5", "PDGFRA", "SOX10", "SDS", "TPSAB1", "TRAC")
+
+filtered_out <- subset(genes_paper, !(genes_paper %in% panc_cells@assays$RNA@counts@Dimnames[[1]]))
+
+#gene in var feature
+filtered_out_var <- subset(genes_paper, genes_paper %in% panc_cells@assays$RNA@var.features)
+
+
+```
+

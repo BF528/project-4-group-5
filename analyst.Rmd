@@ -1,0 +1,212 @@
+---
+title: "analyst"
+author: "Mary T. Yohannes"
+date: "4/17/2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library('Seurat')
+library('dplyr')    
+```
+
+
+```{r}
+# loading RDS file containing saved Seurat object with processed, clustered counts
+ds <- readRDS("/projectnb/bf528/users/group_5/project_4/evie/programmer_output.rda")
+```
+
+```{r}
+# how many cells in each clusters (15 clusters)
+#table(ds@active.ident)
+
+# markers in the paper
+paper_markers<- c("GCG", "INS", "SST", "PPY", "GHRL", "CPA1", "KRT19", "RGS5", "PDGFRA", 'VWF', 'SDS', 'TPSAB1', 'TRAC', 'SOX10') 
+
+# are the marker genes indicated in the paper found in our seurat object? 
+#paper_markers %in% rownames(ds) 
+###INS and PYY were not found in the gene list, but we found INS-IGF2 so substittuted that for INS and removed PYY from out markers list (so no Gamma cells in our dataset)
+
+updated_markers <- c("GCG", "INS-IGF2", "SST", "GHRL", "CPA1", "KRT19", "RGS5", "PDGFRA", 'VWF', 'SDS', 'TPSAB1', 'TRAC', 'SOX10') 
+```
+
+```{r}
+############################################
+#1) identify marker genes for each cluster
+############################################
+
+# finding differentially expressed features (cluster biomarkers) in all clusters (general analysis)  
+all_markers <- FindAllMarkers(ds, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+
+# checking if our gene list were cluster-specific 
+updated_markers %in% rownames(all_markers) 
+# INS-IGF2 and CPA1 were the only ones that were both identified to a certain cell type in the paper and were cell specific markers/specific to one cluster in our dataset 
+# According to the paper = INS - INS-IGF2 = beta and CPA1 = Acinar 
+
+# Find cell types for clusters based on the marker genes found in each 
+# find out marker genes for the rest of the clusters 
+# heatmap of expressison values of gene markers (given in the paper) in each cluster to see which ones are differentially expressed 
+ds <- SetIdent(ds, value = "seurat_clusters")
+heatdata <- AverageExpression(ds, features = updated_markers)$RNA
+heatmap(as.matrix(heatdata))
+# KRT19 and SOX10 = 6, SDS = 10, SST and TBSAB1 = 14, INS-IGF2 = 12, CPA1 and TRAC and VWF and RGS5 = 11, GCG = 7, PDGFRA = 5, GHRL = 2 (might be a mixture of different cells)
+
+# could not find celltypes for clusters 0, 1, 3, 4, 8, 9, 13. so searched the other differentially expressed marker genes on (https://panglaodb.se/) then got the cell type from there; searched all of the marker genes differentially expressed in each cluster together and also the one with the highest ave_logFC by itself
+#rownames(head(FindMarkers(ds,ident.1 = 0, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)))
+#rownames(head(FindMarkers(ds,ident.1 = 1, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)))
+#rownames(head(FindMarkers(ds,ident.1 = 3, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)))
+#rownames(head(FindMarkers(ds,ident.1 = 4, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)))
+#rownames(head(FindMarkers(ds,ident.1 = 8, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)))
+#rownames(head(FindMarkers(ds,ident.1 = 9, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)))
+#rownames(head(FindMarkers(ds,ident.1 = 13, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)))
+# 0 = Germ cell, 1 = Germ cells, 3 = Germ cells, 4 = T-cell, 8 = Germ cell, 9 = Hepatocytes, 13 = Beta cell 
+
+# more info - top 10 marker genes for each cluster 
+#top1markers=all_markers %>% group_by(cluster) %>% top_n(n = 1, wt = avg_logFC)
+
+# explaining clusters 2, 6, 8, 11 
+#head(ds@meta.data)
+VlnPlot(ds, "nFeature_RNA")
+
+########################################################
+#2) Label clusters with cell type based on marker genes
+########################################################
+
+# used the paper and PanglaoDB
+celltypes <- c('Germ cells', 'Germ cells', 'Epsilon', 'Germ cells', 'T-cells', 'Activated Stellate', 'Ductal, Schwann', 'Alpha cells', 'Germ cells', 'Hepatocytes', 'Macrophages', 'Acinar, Cytotoxic T, Endothelial, Quiescent Stellate', 'Beta cells', 'Beta cells', 'Delta cells, Mast')
+all_markers$cell_types <- celltypes[all_markers$cluster] # add as a column 
+```
+
+```{r}
+######################################
+#3) visualize clustered cells using tSNE 
+######################################
+
+lab <- c('Germ cells', 'Germ cells', 'Epsilon', 'Germ cells', 'T-cells', 'Activated Stellate', 'Ductal, Schwann', 'Alpha cells', 'Germ cells', 'Hepatocytes', 'Macrophages', 'Ac, Cy, ET, QS', 'Beta cells', 'Beta cells', 'Delta cells, Mast')
+ds_tsne <- RunTSNE(ds, dims = 1:10)
+names(lab) <- levels(ds_tsne)
+ds_tsne <- RenameIdents(ds_tsne, lab)
+DimPlot(ds_tsne, reduction = "tsne",label = TRUE, pt.size = 0.5, label.size = 4) + NoLegend()
+```
+
+```{r}
+################################################
+#4) visualize the top 2 marker genes per cluster 
+################################################
+
+top2markers=all_markers %>% group_by(cluster) %>% top_n(n = 2, wt = avg_logFC)
+DoHeatmap(ds, features = top2markers$gene)
+```
+
+
+```{r}
+####################################
+#5) Find novel marker genes (padj<0.05, detected at <50% frequency in the clusters being compared)
+####################################
+
+feature0.markers <- FindMarkers(ds, ident.1 = "0", ident.2 = NULL, only.pos = TRUE)
+feature0=feature0.markers[which(feature0.markers$p_val_adj<0.05),]
+#marker genes that already exist
+marker0=all_markers[which(all_markers$cluster==0),]
+marker0=marker0$gene
+#drop marker genes that exist
+f0=feature0[-which(row.names(feature0) %in% marker0),]
+
+feature1.markers <- FindMarkers(ds, ident.1 = "1", ident.2 = NULL, only.pos = TRUE)
+feature1=feature1.markers[which(feature1.markers$p_val_adj<0.05),]
+marker1=all_markers[which(all_markers$cluster==1),]
+marker1=marker1$gene
+f1=feature1[-which(row.names(feature1) %in% marker1),]
+
+feature2.markers <- FindMarkers(ds, ident.1 = "2", ident.2 = NULL, only.pos = TRUE)
+feature2=feature2.markers[which(feature2.markers$p_val_adj<0.05),]
+marker2=all_markers[which(all_markers$cluster==2),]
+marker2=marker2$gene
+f2=feature2[-which(row.names(feature2) %in% marker2),]
+
+feature3.markers <- FindMarkers(ds, ident.1 = "3", ident.2 = NULL, only.pos = TRUE)
+feature3=feature3.markers[which(feature3.markers$p_val_adj<0.05),]
+marker3=all_markers[which(all_markers$cluster==3),]
+f3=feature3[-which(row.names(feature3) %in% marker3$gene),]
+
+feature4.markers <- FindMarkers(ds, ident.1 = "4", ident.2 = NULL, only.pos = TRUE)
+feature4=feature4.markers[which(feature4.markers$p_val_adj<0.05),]
+marker4=all_markers[which(all_markers$cluster==4),]
+f4=feature4[-which(row.names(feature4) %in% marker4$gene),]
+
+feature5.markers <- FindMarkers(ds, ident.1 = "5", ident.2 = NULL, only.pos = TRUE)
+feature5=feature5.markers[which(feature5.markers$p_val_adj<0.05),]
+marker5=all_markers[which(all_markers$cluster==5),]
+f5=feature5[-which(row.names(feature5) %in% marker5$gene),]
+
+feature6.markers <- FindMarkers(ds, ident.1 = "6", ident.2 = NULL, only.pos = TRUE)
+feature6=feature6.markers[which(feature6.markers$p_val_adj<0.05),]
+marker6=all_markers[which(all_markers$cluster==6),]
+f6=feature6[-which(row.names(feature6) %in% marker6$gene),]
+
+feature.markers <- FindMarkers(ds, ident.1 = "7", ident.2 = NULL, only.pos = TRUE)
+feature=feature.markers[which(feature.markers$p_val_adj<0.05),]
+marker=all_markers[which(all_markers$cluster==7),]
+f7=feature[-which(row.names(feature) %in% marker$gene),]
+
+feature.markers <- FindMarkers(ds, ident.1 = "8", ident.2 = NULL, only.pos = TRUE)
+feature=feature.markers[which(feature.markers$p_val_adj<0.05),]
+marker=all_markers[which(all_markers$cluster==8),]
+f8=feature[-which(row.names(feature) %in% marker$gene),]
+
+feature.markers <- FindMarkers(ds, ident.1 = "9", ident.2 = NULL, only.pos = TRUE)
+feature=feature.markers[which(feature.markers$p_val_adj<0.05),]
+marker=all_markers[which(all_markers$cluster==9),]
+f9=feature[-which(row.names(feature) %in% marker$gene),]
+
+feature.markers <- FindMarkers(ds, ident.1 = "10", ident.2 = NULL, only.pos = TRUE)
+feature=feature.markers[which(feature.markers$p_val_adj<0.05),]
+marker=all_markers[which(all_markers$cluster==10),]
+f10=feature[-which(row.names(feature) %in% marker$gene),]
+
+feature.markers <- FindMarkers(ds, ident.1 = "11", ident.2 = NULL, only.pos = TRUE)
+feature=feature.markers[which(feature.markers$p_val_adj<0.05),]
+marker=all_markers[which(all_markers$cluster==11),]
+f11=feature[-which(row.names(feature) %in% marker$gene),]
+
+feature.markers <- FindMarkers(ds, ident.1 = "12", ident.2 = NULL, only.pos = TRUE)
+feature=feature.markers[which(feature.markers$p_val_adj<0.05),]
+marker=all_markers[which(all_markers$cluster==12),]
+f12=feature[-which(row.names(feature) %in% marker$gene),]
+
+feature.markers <- FindMarkers(ds, ident.1 = "13", ident.2 = NULL, only.pos = TRUE)
+feature=feature.markers[which(feature.markers$p_val_adj<0.05),]
+marker=all_markers[which(all_markers$cluster==13),]
+f13=feature[-which(row.names(feature) %in% marker$gene),]
+
+feature.markers <- FindMarkers(ds, ident.1 = "14", ident.2 = NULL, only.pos = TRUE)
+feature=feature.markers[which(feature.markers$p_val_adj<0.05),]
+marker=all_markers[which(all_markers$cluster==14),]
+f14=feature[-which(row.names(feature) %in% marker$gene),]
+```
+
+```{r}
+################################################
+#6) Output marker gene information
+################################################
+f0$cluster=rep(0,length(f0$p_val))
+f1$cluster=rep(1,length(f1$p_val))
+f2$cluster=rep(2,length(f2$p_val))
+f3$cluster=rep(3,length(f3$p_val))
+f4$cluster=rep(4,length(f4$p_val))
+f5$cluster=rep(5,length(f5$p_val))
+f6$cluster=rep(6,length(f6$p_val))
+f7$cluster=rep(7,length(f7$p_val))
+f8$cluster=rep(8,length(f8$p_val))
+f9$cluster=rep(9,length(f9$p_val))
+f10$cluster=rep(10,length(f10$p_val))
+f11$cluster=rep(11,length(f11$p_val))
+f12$cluster=rep(12,length(f12$p_val))
+f13$cluster=rep(13,length(f13$p_val))
+f14$cluster=rep(14,length(f14$p_val))
+
+novel_markers=rbind(f0,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13,f14)
+write.csv(novel_markers,'novel_markers.csv')
+```
+
