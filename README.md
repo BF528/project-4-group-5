@@ -1,6 +1,6 @@
 # Project Description
 
-A brief description of what this repository is for and what it contains
+A single cell RNA sequencing project which aims to replicate some of the analysis in Baron et al, 2016 publication. The project analyzes the data of a type 1 diabetes human female and identifies some of cell subtypes by clustering with Seurat.  
 
 # Contributors
 
